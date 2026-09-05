@@ -1807,6 +1807,16 @@ async function toggleAntigravityQuotaDetails(pathId) {
                                 </h4>
                                 <div style="font-size: 12px; opacity: 0.9; margin-top: 4px;">文件: ${filename}</div>
                             </div>
+                            ${data.observedExhausted ? `
+                                <div style="margin: 0 0 12px; padding: 9px 11px; border-left: 4px solid #dc3545; background: #fff5f5; color: #842029; font-size: 12px;">
+                                    最近一次真实调用已确认部分模型额度耗尽；下方 0% 与重置时间优先采用 429 响应，而不是远端额度列表的错误百分比。
+                                </div>
+                            ` : ''}
+                            ${data.warning ? `
+                                <div style="margin: 0 0 12px; padding: 9px 11px; border-left: 4px solid #ffc107; background: #fffbea; color: #664d03; font-size: 12px;">
+                                    ${escapeHtml(String(data.warning))}
+                                </div>
+                            ` : ''}
                         `;
 
                         if (isGrouped) {
@@ -1906,10 +1916,22 @@ async function toggleAntigravityQuotaDetails(pathId) {
                                             ${resetTime !== 'N/A' ? '🔄 ' + resetTime : ''}
                                         </div>
                                     </div>
+<<<<<<< HEAD
                                 `;
                             }
 
                             quotaHTML += '</div>';
+=======
+                                    <div style="width: 100%; height: 8px; background-color: #e9ecef; border-radius: 4px; overflow: hidden; margin-bottom: 4px;">
+                                        <div style="width: ${usedPercentage}%; height: 100%; background-color: ${percentageColor}; transition: width 0.3s ease;"></div>
+                                    </div>
+                                    <div style="font-size: 10px; color: #666; text-align: right;">
+                                        ${observedExhausted ? '<span style="color: #dc3545; font-weight: bold; margin-right: 6px;">429实测耗尽</span>' : ''}
+                                        ${resetTime !== 'N/A' ? '🔄 ' + resetTime : ''}
+                                    </div>
+                                </div>
+                            `;
+>>>>>>> 39d0f60 (fix: 配额实测显示、OAuth state 脱敏、日志路径校验与安全启动脚本)
                         }
 
                         contentDiv.innerHTML = quotaHTML;

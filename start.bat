@@ -1,7 +1,7 @@
-git fetch --all
-for /f "delims=" %%b in ('git rev-parse --abbrev-ref HEAD') do set branch=%%b
-git reset --hard origin/%branch%
-uv sync
-call .venv\Scripts\activate.bat
-python web.py
-pause
+@echo off
+setlocal
+cd /d "%~dp0"
+
+echo This is the safe local launcher. It does not fetch or reset the repository.
+call "%~dp0start-local.bat"
+exit /b %ERRORLEVEL%
