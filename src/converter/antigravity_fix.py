@@ -19,6 +19,13 @@ from src.converter.thoughtSignature_fix import SKIP_THOUGHT_SIGNATURE_VALIDATOR
 
 # ==================== Gemini API 配置 ====================
 
+_BLOCKED_HERMES_IDENTITY = (
+    "You are Hermes Agent, an intelligent AI assistant created by Nous Research."
+)
+_COMPATIBLE_HERMES_IDENTITY = (
+    "Hermes Agent is an intelligent and helpful software assistant from Nous Research."
+)
+
 DEFAULT_SAFETY_SETTINGS = [
     {"category": "HARM_CATEGORY_HARASSMENT", "threshold": "OFF"},
     {"category": "HARM_CATEGORY_HATE_SPEECH", "threshold": "OFF"},
@@ -35,6 +42,33 @@ DEFAULT_SAFETY_SETTINGS = [
 MAX_OUTPUT_TOKENS = 64000
 TOP_K = 64
 _CLAUDE_THINKING_SIGNATURE = "skip_thought_signature_validator"  # 官方文档推荐的虚拟签名
+
+
+def _rewrite_blocked_system_identity(value: Any) -> tuple[Any, bool]:
+    """Reword the Hermes identity fingerprint that Antigravity rejects as a 429."""
+    if isinstance(value, str):
+        rewritten = value.replace(_BLOCKED_HERMES_IDENTITY, _COMPATIBLE_HERMES_IDENTITY)
+        return rewritten, rewritten != value
+
+    if isinstance(value, list):
+        rewritten_items = []
+        changed = False
+        for item in value:
+            rewritten_item, item_changed = _rewrite_blocked_system_identity(item)
+            rewritten_items.append(rewritten_item)
+            changed = changed or item_changed
+        return rewritten_items, changed
+
+    if isinstance(value, dict):
+        rewritten_dict = {}
+        changed = False
+        for key, item in value.items():
+            rewritten_item, item_changed = _rewrite_blocked_system_identity(item)
+            rewritten_dict[key] = rewritten_item
+            changed = changed or item_changed
+        return rewritten_dict, changed
+
+    return value, False
 
 
 def _append_schema_hint(schema: Dict[str, Any], hint: str) -> None:
@@ -795,7 +829,21 @@ async def normalize_antigravity_request(
 
     result = request.copy()
     model = result.get("model", "")
-    generation_config = (result.get("generationConfig") or {}).copy()
+    generation_config = (result.get("generationConfig") or {}).copy()  # 创建副本避免修改原对象
+    tools = result.get("tools")
+
+    for system_key in ("systemInstruction", "system_instructions"):
+        if system_key not in result:
+            continue
+        rewritten_system, identity_rewritten = _rewrite_blocked_system_identity(
+            result[system_key]
+        )
+        if identity_rewritten:
+            result[system_key] = rewritten_system
+            log.warning(
+                "[ANTIGRAVITY] Reworded a blocked system identity fingerprint "
+                "rejected by the upstream service"
+            )
 
     log.debug(f"[ANTIGRAVITY_FIX] 原始请求 - 模型: {model}, generationConfig: {generation_config}")
 
