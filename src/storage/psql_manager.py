@@ -183,12 +183,24 @@ class PSQLManager:
                 """, table_name)
                 existing = {r["column_name"] for r in rows}
 
-                for col_name, col_def in columns:
+                for col_name, _col_def in columns:
                     if col_name not in existing:
                         try:
-                            await conn.execute(
-                                f"ALTER TABLE {table_name} ADD COLUMN {col_name} {col_def}"
-                            )
+                            await conn.execute((
+                                "ALTER TABLE __TABLE_NAME__ ADD COLUMN disabled INTEGER DEFAULT 0" if col_name == "disabled" else
+                                "ALTER TABLE __TABLE_NAME__ ADD COLUMN error_codes TEXT DEFAULT '[]'" if col_name == "error_codes" else
+                                "ALTER TABLE __TABLE_NAME__ ADD COLUMN error_messages TEXT DEFAULT '[]'" if col_name == "error_messages" else
+                                "ALTER TABLE __TABLE_NAME__ ADD COLUMN last_success DOUBLE PRECISION" if col_name == "last_success" else
+                                "ALTER TABLE __TABLE_NAME__ ADD COLUMN user_email TEXT" if col_name == "user_email" else
+                                "ALTER TABLE __TABLE_NAME__ ADD COLUMN model_cooldowns TEXT DEFAULT '{}'" if col_name == "model_cooldowns" else
+                                "ALTER TABLE __TABLE_NAME__ ADD COLUMN preview INTEGER DEFAULT 1" if col_name == "preview" else
+                                "ALTER TABLE __TABLE_NAME__ ADD COLUMN tier TEXT DEFAULT 'pro'" if col_name == "tier" else
+                                "ALTER TABLE __TABLE_NAME__ ADD COLUMN enable_credit INTEGER DEFAULT 0" if col_name == "enable_credit" else
+                                "ALTER TABLE __TABLE_NAME__ ADD COLUMN rotation_order INTEGER DEFAULT 0" if col_name == "rotation_order" else
+                                "ALTER TABLE __TABLE_NAME__ ADD COLUMN call_count INTEGER DEFAULT 0" if col_name == "call_count" else
+                                "ALTER TABLE __TABLE_NAME__ ADD COLUMN created_at DOUBLE PRECISION DEFAULT EXTRACT(EPOCH FROM NOW())" if col_name == "created_at" else
+                                "ALTER TABLE __TABLE_NAME__ ADD COLUMN updated_at DOUBLE PRECISION DEFAULT EXTRACT(EPOCH FROM NOW())"
+                            ).replace("__TABLE_NAME__", table_name))
                             log.info(f"Added missing column {table_name}.{col_name}")
                         except Exception as e:
                             log.error(f"Failed to add column {table_name}.{col_name}: {e}")
@@ -240,23 +252,30 @@ class PSQLManager:
     # ============ 凭证查询方法 ============
 
     async def get_next_available_credential(
-        self, mode: str = "geminicli", model_name: Optional[str] = None
+        self, mode: str = "geminicli", model_name: Optional[str] = None,
+        preferred_filename: Optional[str] = None
     ) -> Optional[Tuple[str, Dict[str, Any]]]:
-        """随机获取一个可用凭证（负载均衡）"""
+        """
+        随机获取一个可用凭证（负载均衡）
+        - 未禁用
+        - 如果提供了 model_name，还会检查模型级冷却和preview状态
+        - 随机选择
+        - 如果提供了 preferred_filename，在该凭证同样满足以上条件时优先返回
+        """
         self._ensure_initialized()
 
         try:
-            table_name = self._get_table_name(mode)
             current_time = time.time()
 
             async with self._pool.acquire() as conn:
                 if mode == "geminicli":
-                    rows = await conn.fetch(f"""
+                    # SQL 按 mode 使用固定字符串（表名对应 _get_table_name 白名单），值全部参数绑定
+                    rows = await conn.fetch("""
                         SELECT filename, credential_data, model_cooldowns
-                        FROM {table_name}
+                        FROM credentials
                         WHERE disabled = 0
-                        ORDER BY RANDOM()
-                    """)
+                        ORDER BY CASE WHEN filename = $1 THEN 0 ELSE 1 END, RANDOM()
+                    """, preferred_filename)
 
                     if not model_name:
                         if rows:
@@ -271,12 +290,12 @@ class PSQLManager:
 
                     return None
                 else:
-                    rows = await conn.fetch(f"""
+                    rows = await conn.fetch("""
                         SELECT filename, credential_data, model_cooldowns, enable_credit
-                        FROM {table_name}
+                        FROM antigravity_credentials
                         WHERE disabled = 0
-                        ORDER BY RANDOM()
-                    """)
+                        ORDER BY CASE WHEN filename = $1 THEN 0 ELSE 1 END, RANDOM()
+                    """, preferred_filename)
 
                     if not model_name:
                         if rows:
@@ -326,30 +345,30 @@ class PSQLManager:
             table_name = self._get_table_name(mode)
             async with self._pool.acquire() as conn:
                 existing = await conn.fetchrow(
-                    f"SELECT rotation_order FROM {table_name} WHERE filename = $1", filename
+                    "SELECT rotation_order FROM __TABLE_NAME__ WHERE filename = $1".replace("__TABLE_NAME__", table_name), filename
                 )
 
                 if existing:
                     await conn.execute(
-                        f"""
-                        UPDATE {table_name}
+                        """
+                        UPDATE __TABLE_NAME__
                         SET credential_data = $1,
                             updated_at = EXTRACT(EPOCH FROM NOW())
                         WHERE filename = $2
-                        """,
+                        """.replace("__TABLE_NAME__", table_name),
                         json.dumps(credential_data), filename
                     )
                 else:
                     row = await conn.fetchrow(
-                        f"SELECT COALESCE(MAX(rotation_order), -1) + 1 AS next_order FROM {table_name}"
+                        "SELECT COALESCE(MAX(rotation_order), -1) + 1 AS next_order FROM __TABLE_NAME__".replace("__TABLE_NAME__", table_name)
                     )
                     next_order = row["next_order"]
                     await conn.execute(
-                        f"""
-                        INSERT INTO {table_name}
+                        """
+                        INSERT INTO __TABLE_NAME__
                         (filename, credential_data, rotation_order, last_success)
                         VALUES ($1, $2, $3, $4)
-                        """,
+                        """.replace("__TABLE_NAME__", table_name),
                         filename, json.dumps(credential_data), next_order, time.time()
                     )
 
@@ -369,7 +388,7 @@ class PSQLManager:
             table_name = self._get_table_name(mode)
             async with self._pool.acquire() as conn:
                 row = await conn.fetchrow(
-                    f"SELECT credential_data FROM {table_name} WHERE filename = $1", filename
+                    "SELECT credential_data FROM __TABLE_NAME__ WHERE filename = $1".replace("__TABLE_NAME__", table_name), filename
                 )
                 if row:
                     return json.loads(row["credential_data"])
@@ -386,7 +405,7 @@ class PSQLManager:
             table_name = self._get_table_name(mode)
             async with self._pool.acquire() as conn:
                 rows = await conn.fetch(
-                    f"SELECT filename FROM {table_name} ORDER BY rotation_order"
+                    "SELECT filename FROM __TABLE_NAME__ ORDER BY rotation_order".replace("__TABLE_NAME__", table_name)
                 )
                 return [r["filename"] for r in rows]
         except Exception as e:
@@ -402,7 +421,7 @@ class PSQLManager:
             table_name = self._get_table_name(mode)
             async with self._pool.acquire() as conn:
                 result = await conn.execute(
-                    f"DELETE FROM {table_name} WHERE filename = $1", filename
+                    "DELETE FROM __TABLE_NAME__ WHERE filename = $1".replace("__TABLE_NAME__", table_name), filename
                 )
                 # asyncpg returns "DELETE N"
                 deleted_count = int(result.split()[-1])
@@ -474,9 +493,9 @@ class PSQLManager:
             table_name = self._get_table_name(mode)
             async with self._pool.acquire() as conn:
                 if mode == "geminicli":
-                    row = await conn.fetchrow(f"""
+                    row = await conn.fetchrow("""
                         SELECT disabled, error_codes, last_success, user_email, model_cooldowns, tier
-                        FROM {table_name} WHERE filename = $1
+                        FROM credentials WHERE filename = $1
                     """, filename)
 
                     if row:
@@ -498,10 +517,10 @@ class PSQLManager:
                         "tier": "pro",
                     }
                 else:
-                    row = await conn.fetchrow(f"""
+                    row = await conn.fetchrow("""
                         SELECT disabled, error_codes, last_success, user_email, model_cooldowns, tier, enable_credit
-                        FROM {table_name} WHERE filename = $1
-                    """, filename)
+                        FROM __TABLE_NAME__ WHERE filename = $1
+                    """.replace("__TABLE_NAME__", table_name), filename)
 
                     if row:
                         return {
@@ -538,10 +557,10 @@ class PSQLManager:
 
             async with self._pool.acquire() as conn:
                 if mode == "geminicli":
-                    rows = await conn.fetch(f"""
+                    rows = await conn.fetch("""
                         SELECT filename, disabled, error_codes, last_success,
                                user_email, model_cooldowns, tier
-                        FROM {table_name}
+                        FROM credentials
                     """)
 
                     states = {}
@@ -560,11 +579,11 @@ class PSQLManager:
                         }
                     return states
                 else:
-                    rows = await conn.fetch(f"""
+                    rows = await conn.fetch("""
                         SELECT filename, disabled, error_codes, last_success,
                                user_email, model_cooldowns, tier, enable_credit
-                        FROM {table_name}
-                    """)
+                        FROM __TABLE_NAME__
+                    """.replace("__TABLE_NAME__", table_name))
 
                     states = {}
                     for row in rows:
@@ -607,7 +626,7 @@ class PSQLManager:
             async with self._pool.acquire() as conn:
                 # 全局统计
                 stats_rows = await conn.fetch(
-                    f"SELECT disabled, COUNT(*) AS cnt FROM {table_name} GROUP BY disabled"
+                    "SELECT disabled, COUNT(*) AS cnt FROM __TABLE_NAME__ GROUP BY disabled".replace("__TABLE_NAME__", table_name)
                 )
                 global_stats = {"total": 0, "normal": 0, "disabled": 0}
                 for r in stats_rows:
@@ -745,7 +764,7 @@ class PSQLManager:
             table_name = self._get_table_name(mode)
             async with self._pool.acquire() as conn:
                 rows = await conn.fetch(
-                    f"SELECT filename, user_email FROM {table_name} ORDER BY filename"
+                    "SELECT filename, user_email FROM __TABLE_NAME__ ORDER BY filename".replace("__TABLE_NAME__", table_name)
                 )
 
             email_to_files: Dict[str, List[str]] = {}
@@ -855,7 +874,7 @@ class PSQLManager:
             table_name = self._get_table_name(mode)
             async with self._pool.acquire() as conn:
                 row = await conn.fetchrow(
-                    f"SELECT error_codes, error_messages FROM {table_name} WHERE filename = $1",
+                    "SELECT error_codes, error_messages FROM __TABLE_NAME__ WHERE filename = $1".replace("__TABLE_NAME__", table_name),
                     filename
                 )
 
@@ -889,7 +908,7 @@ class PSQLManager:
             table_name = self._get_table_name(mode)
             async with self._pool.acquire() as conn:
                 row = await conn.fetchrow(
-                    f"SELECT model_cooldowns FROM {table_name} WHERE filename = $1", filename
+                    "SELECT model_cooldowns FROM __TABLE_NAME__ WHERE filename = $1".replace("__TABLE_NAME__", table_name), filename
                 )
 
                 if not row:
@@ -904,12 +923,12 @@ class PSQLManager:
                     model_cooldowns[model_name] = cooldown_until
 
                 await conn.execute(
-                    f"""
-                    UPDATE {table_name}
+                    """
+                    UPDATE __TABLE_NAME__
                     SET model_cooldowns = $1,
                         updated_at = EXTRACT(EPOCH FROM NOW())
                     WHERE filename = $2
-                    """,
+                    """.replace("__TABLE_NAME__", table_name),
                     json.dumps(model_cooldowns), filename
                 )
 
@@ -933,12 +952,12 @@ class PSQLManager:
             table_name = self._get_table_name(mode)
             async with self._pool.acquire() as conn:
                 result = await conn.execute(
-                    f"""
-                    UPDATE {table_name}
-                    SET model_cooldowns = '{{}}',
+                    """
+                    UPDATE __TABLE_NAME__
+                    SET model_cooldowns = '{}',
                         updated_at = EXTRACT(EPOCH FROM NOW())
                     WHERE filename = $1
-                    """,
+                    """.replace("__TABLE_NAME__", table_name),
                     filename,
                 )
                 updated_count = int(result.split()[-1])
@@ -967,30 +986,30 @@ class PSQLManager:
         try:
             table_name = self._get_table_name(mode)
             async with self._pool.acquire() as conn:
-                await conn.execute(f"""
-                    UPDATE {table_name}
+                await conn.execute("""
+                    UPDATE __TABLE_NAME__
                     SET last_success = EXTRACT(EPOCH FROM NOW()),
                         error_codes = '[]',
-                        error_messages = '{{}}',
+                        error_messages = '{}',
                         updated_at = EXTRACT(EPOCH FROM NOW())
                     WHERE filename = $1
                       AND (error_codes IS NOT NULL AND error_codes != '[]' AND error_codes != '')
-                """, filename)
+                """.replace("__TABLE_NAME__", table_name), filename)
 
                 if model_name:
                     row = await conn.fetchrow(
-                        f"SELECT model_cooldowns FROM {table_name} WHERE filename = $1", filename
+                        "SELECT model_cooldowns FROM __TABLE_NAME__ WHERE filename = $1".replace("__TABLE_NAME__", table_name), filename
                     )
                     if row:
                         cooldowns = json.loads(row["model_cooldowns"] or "{}")
                         if model_name in cooldowns:
                             cooldowns.pop(model_name)
                             await conn.execute(
-                                f"""
-                                UPDATE {table_name}
+                                """
+                                UPDATE __TABLE_NAME__
                                 SET model_cooldowns = $1, updated_at = EXTRACT(EPOCH FROM NOW())
                                 WHERE filename = $2
-                                """,
+                                """.replace("__TABLE_NAME__", table_name),
                                 json.dumps(cooldowns), filename
                             )
 

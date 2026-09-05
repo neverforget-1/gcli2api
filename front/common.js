@@ -1863,6 +1863,7 @@ async function toggleAntigravityQuotaDetails(pathId) {
                                     const resetTime = (quotaData.resetTime && quotaData.resetTime !== 'N/A') ? quotaData.resetTime : '';
                                     const usedPercentage = Math.round((1 - remainingFraction) * 100);
                                     const remainingPercentage = Math.round(remainingFraction * 100);
+                                    const observedExhausted = quotaData.observedExhausted === true;
 
                                     let barColor = '#28a745';
                                     if (usedPercentage >= 90) barColor = '#dc3545';
@@ -1876,7 +1877,7 @@ async function toggleAntigravityQuotaDetails(pathId) {
                                                 <div style="width: ${usedPercentage}%; height: 100%; background-color: ${barColor}; transition: width 0.3s ease;"></div>
                                             </div>
                                             <span style="font-size: 12px; font-weight: bold; color: ${barColor}; width: 38px; text-align: right;">${remainingPercentage}%</span>
-                                            <span style="font-size: 10px; color: #999; width: 88px; text-align: right; flex-shrink: 0;">${resetTime ? '🔄 ' + resetTime : ''}</span>
+                                            <span style="font-size: 10px; color: #999; width: 88px; text-align: right; flex-shrink: 0;">${observedExhausted ? '<span style="color: #dc3545; font-weight: bold; margin-right: 6px;">429实测耗尽</span>' : ''}${resetTime ? '🔄 ' + resetTime : ''}</span>
                                         </div>
                                     `;
                                 });
@@ -1893,6 +1894,7 @@ async function toggleAntigravityQuotaDetails(pathId) {
                                 const resetTime = quotaData.resetTime || 'N/A';
                                 const usedPercentage = Math.round((1 - remainingFraction) * 100);
                                 const remainingPercentage = Math.round(remainingFraction * 100);
+                                const observedExhausted = quotaData.observedExhausted === true;
 
                                 let percentageColor = '#28a745';
                                 if (usedPercentage >= 90) percentageColor = '#dc3545';
@@ -1913,25 +1915,14 @@ async function toggleAntigravityQuotaDetails(pathId) {
                                             <div style="width: ${usedPercentage}%; height: 100%; background-color: ${percentageColor}; transition: width 0.3s ease;"></div>
                                         </div>
                                         <div style="font-size: 10px; color: #666; text-align: right;">
+                                            ${observedExhausted ? '<span style="color: #dc3545; font-weight: bold; margin-right: 6px;">429实测耗尽</span>' : ''}
                                             ${resetTime !== 'N/A' ? '🔄 ' + resetTime : ''}
                                         </div>
                                     </div>
-<<<<<<< HEAD
                                 `;
                             }
 
                             quotaHTML += '</div>';
-=======
-                                    <div style="width: 100%; height: 8px; background-color: #e9ecef; border-radius: 4px; overflow: hidden; margin-bottom: 4px;">
-                                        <div style="width: ${usedPercentage}%; height: 100%; background-color: ${percentageColor}; transition: width 0.3s ease;"></div>
-                                    </div>
-                                    <div style="font-size: 10px; color: #666; text-align: right;">
-                                        ${observedExhausted ? '<span style="color: #dc3545; font-weight: bold; margin-right: 6px;">429实测耗尽</span>' : ''}
-                                        ${resetTime !== 'N/A' ? '🔄 ' + resetTime : ''}
-                                    </div>
-                                </div>
-                            `;
->>>>>>> 39d0f60 (fix: 配额实测显示、OAuth state 脱敏、日志路径校验与安全启动脚本)
                         }
 
                         contentDiv.innerHTML = quotaHTML;
