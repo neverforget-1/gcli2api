@@ -628,3 +628,62 @@ def parse_antigravity_quota_reset_timestamp(error_response: dict) -> Optional[fl
 
     except Exception:
         return None
+
+
+def extract_quota_exhaustion(
+    error_response: dict,
+    mode: str = "geminicli",
+    now: Optional[float] = None,
+) -> Optional[Dict[str, Any]]:
+    """兼容层：在两个分模式解析器之上构建配额耗尽观测 dict。
+
+    面板（src/panel/creds.py）用它在远端额度列表上叠加 429 实测冷却
+    （模型名 + 精确重置时间）。字段语义：
+    - model: ErrorInfo.metadata.model（可能缺失）
+    - reset_timestamp: 解析出的绝对时间戳（秒）
+    - explicit: 是否显式携带 QUOTA_EXHAUSTED reason
+    """
+    if not isinstance(error_response, dict):
+        return None
+
+    now_ts = time.time() if now is None else now
+    error_obj = error_response.get("error")
+    if not isinstance(error_obj, dict):
+        return None
+
+    details = error_obj.get("details", [])
+    quota_detail = None
+    if isinstance(details, list):
+        for detail in details:
+            if (
+                isinstance(detail, dict)
+                and str(detail.get("reason", "")).upper() == "QUOTA_EXHAUSTED"
+            ):
+                quota_detail = detail
+                break
+
+    if mode.lower() == "antigravity":
+        # antigravity 的泛 RESOURCE_EXHAUSTED 可能是非配额失败,仅在
+        # 显式 QUOTA_EXHAUSTED 时给出观测,避免误冷却整个凭证
+        if quota_detail is None:
+            return None
+        reset_timestamp = parse_antigravity_quota_reset_timestamp(error_response)
+    else:
+        if error_obj.get("status") != "RESOURCE_EXHAUSTED":
+            return None
+        reset_timestamp = parse_quota_reset_timestamp(error_response)
+
+    if reset_timestamp is None or reset_timestamp <= now_ts:
+        return None
+
+    metadata = quota_detail.get("metadata", {}) if quota_detail else {}
+    if not isinstance(metadata, dict):
+        metadata = {}
+    model = metadata.get("model")
+
+    return {
+        "model": model.strip() if isinstance(model, str) else None,
+        "reset_timestamp": reset_timestamp,
+        "reason": "QUOTA_EXHAUSTED" if quota_detail is not None else "RESOURCE_EXHAUSTED",
+        "explicit": quota_detail is not None,
+    }
