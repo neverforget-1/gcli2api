@@ -19,12 +19,22 @@ from src.converter.thoughtSignature_fix import SKIP_THOUGHT_SIGNATURE_VALIDATOR
 
 # ==================== Gemini API 配置 ====================
 
-_BLOCKED_HERMES_IDENTITY = (
-    "You are Hermes Agent, an intelligent AI assistant created by Nous Research."
-)
-_COMPATIBLE_HERMES_IDENTITY = (
-    "Hermes Agent is an intelligent and helpful software assistant from Nous Research."
-)
+# 触发 Antigravity 429 误判（滥用拦截）的第一人称身份前缀 → 兼容改写。
+# 命中即整请求 429，额度不计费；新增客户端时在此追加条目。
+_BLOCKED_IDENTITY_REWRITES: list[tuple[str, str]] = [
+    (
+        "You are Hermes Agent, an intelligent AI assistant created by Nous Research.",
+        "Hermes Agent is an intelligent and helpful software assistant from Nous Research.",
+    ),
+    (
+        "You are Claude Code, Anthropic's official CLI for Claude.",
+        "Claude Code is a command-line coding assistant from Anthropic.",
+    ),
+]
+
+# 兼容别名：旧引用与测试仍使用 Hermes 单条常量
+_BLOCKED_HERMES_IDENTITY = _BLOCKED_IDENTITY_REWRITES[0][0]
+_COMPATIBLE_HERMES_IDENTITY = _BLOCKED_IDENTITY_REWRITES[0][1]
 
 DEFAULT_SAFETY_SETTINGS = [
     {"category": "HARM_CATEGORY_HARASSMENT", "threshold": "OFF"},
@@ -45,9 +55,11 @@ _CLAUDE_THINKING_SIGNATURE = "skip_thought_signature_validator"  # 官方文档�
 
 
 def _rewrite_blocked_system_identity(value: Any) -> tuple[Any, bool]:
-    """Reword the Hermes identity fingerprint that Antigravity rejects as a 429."""
+    """Reword system identity fingerprints that Antigravity rejects as a 429."""
     if isinstance(value, str):
-        rewritten = value.replace(_BLOCKED_HERMES_IDENTITY, _COMPATIBLE_HERMES_IDENTITY)
+        rewritten = value
+        for blocked, compatible in _BLOCKED_IDENTITY_REWRITES:
+            rewritten = rewritten.replace(blocked, compatible)
         return rewritten, rewritten != value
 
     if isinstance(value, list):
