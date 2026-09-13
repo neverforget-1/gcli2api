@@ -26,7 +26,7 @@ from src.utils import verify_panel_token, GEMINICLI_USER_AGENT, ANTIGRAVITY_USER
 from src.api.antigravity import fetch_quota_info
 from src.api.utils import extract_quota_exhaustion
 from src.google_oauth_api import Credentials, fetch_project_id_and_tier, get_user_projects, select_default_project, enable_required_apis
-from config import get_code_assist_endpoint, get_antigravity_api_url
+from config import get_code_assist_endpoint, get_antigravity_api_url, get_credential_test_models
 from .utils import validate_mode
 
 
@@ -275,12 +275,12 @@ async def _get_observed_quota_cooldowns(
     return cooldowns
 
 
-async def _probe_antigravity_credential(access_token: str, project_id: str):
+async def _probe_antigravity_credential(access_token: str, project_id: str, model: str = "gemini-2.5-flash"):
     """Run the same minimal wrapped request used by the Antigravity API path."""
     from src.api.antigravity import build_antigravity_headers, wrap_cli_request
     from src.httpx_client import post_async
 
-    test_model = "gemini-2.5-flash"
+    test_model = model
     request = {
         "contents": [{"role": "user", "parts": [{"text": "hi"}]}],
         "generationConfig": {"maxOutputTokens": 1},
@@ -1864,9 +1864,23 @@ async def test_credential(
                 "User-Agent": GEMINICLI_USER_AGENT,
             }
 
-        # 第一次测试：使用 gemini-2.5-flash
+        # 第一次测试：antigravity 按配置的模型列表依次探测（任一通过即成功，
+        # 避免单一模型上游容量问题被误判为凭证故障）；geminicli 先测 gemini-2.5-flash
         if mode == "antigravity":
-            response = await _probe_antigravity_credential(access_token, project_id)
+            test_models = await get_credential_test_models()
+            response = None
+            status_code = None
+            test_model = None
+            for model in test_models:
+                response = await _probe_antigravity_credential(access_token, project_id, model)
+                status_code = response.status_code
+                test_model = model
+                if status_code == 200 or status_code == 429:
+                    break
+                log.info(
+                    f"测试模型未通过，尝试列表中的下一个模型: {filename} "
+                    f"(model={model}, status={status_code})"
+                )
         else:
             response = await post_async(
                 url=f"{api_base_url}/v1internal:generateContent",
@@ -1948,6 +1962,7 @@ async def test_credential(
                     "success": True,
                     "status_code": status_code,
                     "message": "测试成功",
+                    "model": test_model,
                     "filename": filename
                 }
             )
@@ -1997,6 +2012,7 @@ async def test_credential(
                 "success": False,
                 "status_code": status_code,
                 "message": f"测试失败: HTTP {status_code}",
+                "model": test_model,
                 "error": error_text,
                 "validation_required": _is_validation_required(error_text),
                 "filename": filename
