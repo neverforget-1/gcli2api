@@ -40,6 +40,7 @@ ENV_MAPPINGS = {
     "RETURN_THOUGHTS_TO_FRONTEND": "return_thoughts_to_frontend",
     "ANTIGRAVITY_STREAM2NOSTREAM": "antigravity_stream2nostream",
     "ANTIGRAVITY_SWITCH_CREDENTIAL": "antigravity_switch_credential_enabled",
+    "CREDENTIAL_TEST_MODELS": "credential_test_models",
     "HOST": "host",
     "PORT": "port",
     # 值是配置键名字符串（非凭据），拆写避免静态扫描按默认口令字典误报
@@ -148,6 +149,33 @@ async def get_auto_ban_error_codes() -> list:
     if codes and isinstance(codes, list):
         return codes
     return AUTO_BAN_ERROR_CODES
+
+
+async def get_credential_test_models() -> list:
+    """
+    Get the model list used for panel credential message testing (tried in order, considered success if any passes).
+
+    Environment variable: CREDENTIAL_TEST_MODELS (comma-separated, e.g., "gemini-3-flash,gemini-2.5-flash")
+    Database config key: credential_test_models
+    Default: ["gemini-3-flash", "gemini-2.5-flash"]
+
+    Note: Do not use a single model as the only criterion for credential health—certain models
+    (e.g., gemini-2.5-flash) may return 503 MODEL_CAPACITY_EXHAUSTED due to upstream capacity issues,
+    which is unrelated to the credential's own health.
+    """
+    env_value = os.getenv("CREDENTIAL_TEST_MODELS")
+    if env_value:
+        models = [m.strip() for m in env_value.split(",") if m.strip()]
+        if models:
+            return models
+
+    stored = await get_config_value("credential_test_models")
+    if stored and isinstance(stored, list):
+        models = [str(m).strip() for m in stored if str(m).strip()]
+        if models:
+            return models
+
+    return ["gemini-3-flash", "gemini-2.5-flash"]
 
 
 async def get_retry_429_max_retries() -> int:
