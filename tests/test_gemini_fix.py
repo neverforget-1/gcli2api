@@ -48,6 +48,27 @@ def test_rewrites_blocked_hermes_identity_without_mutating_input():
     assert original["parts"][0]["text"].startswith("You are Hermes Agent")
 
 
+def test_rewrites_blocked_claude_code_identity():
+    original = {
+        "parts": [
+            {
+                "text": (
+                    "You are Claude Code, Anthropic's official CLI for Claude. "
+                    "Help the user with their task."
+                )
+            }
+        ]
+    }
+
+    rewritten, changed = _rewrite_blocked_system_identity(original)
+
+    assert changed is True
+    assert rewritten["parts"][0]["text"].startswith(
+        "Claude Code is a command-line coding assistant from Anthropic."
+    )
+    assert original["parts"][0]["text"].startswith("You are Claude Code")
+
+
 def test_leaves_unrelated_system_identity_unchanged():
     original = {"parts": [{"text": "You are a concise assistant."}]}
 

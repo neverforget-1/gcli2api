@@ -18,7 +18,7 @@ rem Load the existing local configuration without printing secret values.
 for /f "usebackq eol=# tokens=1,* delims==" %%A in (".env") do set "%%A=%%B"
 
 rem Proxy settings are intentionally explicit for this alternate launcher.
-set "HOST=0.0.0.0"
+set "HOST=127.0.0.1"
 set "PORT=7861"
 set "HTTP_PROXY=http://127.0.0.1:7890"
 set "HTTPS_PROXY=http://127.0.0.1:7890"
