@@ -12,6 +12,9 @@ from motor.motor_asyncio import AsyncIOMotorClient, AsyncIOMotorDatabase
 
 from log import log
 
+# 凭证池随机选取使用系统级 CSPRNG，满足安全扫描对随机源的要求
+_system_random = random.SystemRandom()
+
 
 class MongoDBManager:
     """MongoDB 数据库管理器"""
@@ -407,7 +410,7 @@ class MongoDBManager:
                     log.debug(f"[Redis MISS] mode={mode} preview+non-free: no candidates, fallback to MongoDB")
                     return None
                 sample_size = min(len(all_candidates), 10)
-                candidates = random.sample(all_candidates, sample_size)
+                candidates = _system_random.sample(all_candidates, sample_size)
             elif preview_only:
                 preview_key = self._rk_preview(mode)
                 preview_size = await self._redis.scard(preview_key)
@@ -426,7 +429,7 @@ class MongoDBManager:
                     log.debug(f"[Redis MISS] mode={mode} exclude_free: no non-free creds, fallback to MongoDB")
                     return None
                 sample_size = min(len(all_candidates), 10)
-                candidates = random.sample(all_candidates, sample_size)
+                candidates = _system_random.sample(all_candidates, sample_size)
             else:
                 pool_key = self._rk_avail(mode)
                 pool_size = await self._redis.scard(pool_key)
@@ -571,7 +574,7 @@ class MongoDBManager:
                 return None
 
             # 随机偏移 + limit(1)，替代 $sample，避免全集合随机排序
-            skip_n = random.randint(0, count - 1)
+            skip_n = _system_random.randint(0, count - 1)
             docs = await collection.find(match_query, projection).skip(skip_n).limit(1).to_list(1)
 
             if docs:
