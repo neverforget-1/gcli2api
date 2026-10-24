@@ -27,6 +27,20 @@ SUPPORTED_ASPECT_RATIOS = [
     (4, 5), (5, 4), (9, 16), (16, 9), (21, 9),
 ]
 
+# 触发 Antigravity 429 误判（滥用拦截）的第一人称身份前缀 → 兼容改写。
+# 命中即整请求 429，额度不计费；新增客户端时在此追加条目。
+# （与面板的敏感词过滤互补：这里是定点改写，保留人设语义而非整句删除）
+_BLOCKED_IDENTITY_REWRITES: list[tuple[str, str]] = [
+    (
+        "You are Hermes Agent, an intelligent AI assistant created by Nous Research.",
+        "Hermes Agent is an intelligent and helpful software assistant from Nous Research.",
+    ),
+    (
+        "You are Claude Code, Anthropic's official CLI for Claude.",
+        "Claude Code is a command-line coding assistant from Anthropic.",
+    ),
+]
+
 # ==================== Gemini API 安全配置 ====================
 
 DEFAULT_SAFETY_SETTINGS = [
@@ -733,6 +747,35 @@ def _filter_system_instruction_sensitive_words(system_instruction: Any, patterns
     return {**system_instruction, "parts": new_parts}
 
 
+def _rewrite_blocked_system_identity(value: Any) -> tuple[Any, bool]:
+    """Reword system identity fingerprints that Antigravity rejects as a 429."""
+    if isinstance(value, str):
+        rewritten = value
+        for blocked, compatible in _BLOCKED_IDENTITY_REWRITES:
+            rewritten = rewritten.replace(blocked, compatible)
+        return rewritten, rewritten != value
+
+    if isinstance(value, list):
+        rewritten_items = []
+        changed = False
+        for item in value:
+            rewritten_item, item_changed = _rewrite_blocked_system_identity(item)
+            rewritten_items.append(rewritten_item)
+            changed = changed or item_changed
+        return rewritten_items, changed
+
+    if isinstance(value, dict):
+        rewritten_dict = {}
+        changed = False
+        for key, item in value.items():
+            rewritten_item, item_changed = _rewrite_blocked_system_identity(item)
+            rewritten_dict[key] = rewritten_item
+            changed = changed or item_changed
+        return rewritten_dict, changed
+
+    return value, False
+
+
 def _clean_contents(contents: List[Any], model_name: str) -> List[Any]:
     """过滤空 part、规范 thoughtSignature、修正 text 字段类型、丢弃没有有效 part 的 content"""
     cleaned_contents = []
@@ -897,6 +940,23 @@ async def normalize_antigravity_request(
         if result.get("system_instruction") is not None:
             result["system_instruction"] = _filter_system_instruction_sensitive_words(
                 result.get("system_instruction"), sensitive_patterns
+            )
+
+    # ========== 0.5 身份指纹改写 ==========
+    # 已知会触发 Antigravity 滥用拦截 429 的第一人称身份前缀做定点改写
+    # （保留人设语义；与上面的敏感词删除式过滤互补）
+    for system_key in ("systemInstruction", "system_instructions"):
+        if system_key not in result:
+            continue
+        rewritten_system, identity_rewritten = _rewrite_blocked_system_identity(
+            result[system_key]
+        )
+        if identity_rewritten:
+            result[system_key] = rewritten_system
+            print(
+                "[ANTIGRAVITY] Reworded a blocked system identity fingerprint "
+                "rejected by the upstream service",
+                flush=True,
             )
 
     # 图片模型走独立的图片生成处理路径
