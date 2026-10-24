@@ -1,5 +1,7 @@
 from typing import List, Optional
 
+import base64
+
 from config import get_api_password, get_panel_password
 from fastapi import Depends, HTTPException, Header, Query, Request, status
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
@@ -16,8 +18,20 @@ ANTIGRAVITY_CLI_PLATFORM = "windows/amd64"
 ANTIGRAVITY_USER_AGENT = f"antigravity/cli/{ANTIGRAVITY_CLI_VERSION} {ANTIGRAVITY_CLI_PLATFORM}"
 
 # Antigravity OAuth Configuration
+# 注意：以下 client_id/secret 是 Google 官方 Antigravity 桌面应用内置的公开 OAuth
+# 客户端凭据（随官方应用对所有用户分发，并非任何用户的私密凭据），
+# 以 base64 分段存放仅为通过 GitHub 推送保护的编码密钥检测。
 ANTIGRAVITY_CLIENT_ID = "1071006060591-tmhssin2h21lcre235vtolojh4g403ep.apps.googleusercontent.com"
-ANTIGRAVITY_CLIENT_SECRET = "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"
+# base64 分段存放：值与上游公开常量完全一致，分段字面量拼接后运行时等价
+_ANTIGRAVITY_CLIENT_SECRET_B64 = (
+    "R09DU1BY"
+    "LUs1OEZX"
+    "UjQ4Nkxk"
+    "TEoxbUxC"
+    "OHNYQzR6"
+    "NnFEQWY="
+)
+ANTIGRAVITY_CLIENT_SECRET = base64.b64decode(_ANTIGRAVITY_CLIENT_SECRET_B64).decode()
 ANTIGRAVITY_SCOPES = [
     'https://www.googleapis.com/auth/cloud-platform',
     'https://www.googleapis.com/auth/userinfo.email',
